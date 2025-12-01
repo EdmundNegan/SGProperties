@@ -6,11 +6,11 @@ execute:
   echo: true
 
 book:
-  title: "YOUR PROJECT TITLE"
+  title: "Singapore Property Market Analysis"
   author:
-    - AUTHOR1 (UNI1)
-    - AUTHOR2 (UNI2)
-  repo-url: https://github.com/YOUR_GITHUB_ACCOUNT/REPO_NAME
+    - Ming Wei Edmund Ngan (mn3303)
+    - Neaton Jia Jun Ang (na3201)
+  repo-url: https://github.com/EdmundNegan/SGProperties.git
   date: today
   page-footer:
     right: |
