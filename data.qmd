@@ -1,5 +1,193 @@
 # Data
 
 ## Description
+The data sources we will be using for this project are: 
+1) Public housing: HDB Resale Flat Prices dataset (https://data.gov.sg/datasets?agencies=HDB&resultId=d_b51323a474ba789fb4cc3db58a3116d4)
+2) Private housing: Private Residential Property Transactions
+(https://www.ura.gov.sg/Corporate/Property/Property-Data/Private-Residential-Properties)
+
+Both datasets are provided by official government ministries of Singapore, with the first being from the Housing and Development Board (HDB) and the second from the Urban Redevelopment Authority (URA). Both datasets are updated quarterly, and we will focus on data from the past 5 years to capture recent trends and the impact of government cooling measures.
 
 ## Missing value analysis
+At first glance, the dataset appears to have NA and “-” to indicate missing values. This likely represents represents "Not Applicable/Not Available" and "No Transactions" respectively. The NA value likely means that these type of flats are not available for purchase in those neighbourhoods (Bishan & 1-Room Flats) and the "-" could mean that there are flats available but no purchases were made. We will load the data and check for missing values across all columns.
+
+```{r}
+# Load necessary libraries
+library(tidyverse)
+library(sf)
+library(lubridate)
+
+# 1. Load the Data
+df <- read_csv("datasets/MedianResalePricesforRegisteredApplicationsbyTownandFlatType.csv", 
+               na = c("na", "-", "NA"))
+
+# Load Singapore Geospatial Data (Planning Areas)
+# We use a public GeoJSON link for Singapore Planning Areas
+# If this link fails, you can download "Master Plan 2019 Planning Area Boundary" from data.gov.sg
+geojson_url <- "https://raw.githubusercontent.com/yinshanyang/singapore/master/maps/2-planning-area.geojson"
+sg_map <- st_read(geojson_url, quiet = TRUE) %>%
+  mutate(name = toupper(name)) # Standardize map names to Uppercase
+
+# 2. Check for Missing Values
+missing_summary <- df %>%
+  summarise(across(everything(), ~ sum(is.na(.)), .names = "missing_{col}"))
+print(missing_summary)
+
+# 3. Clean Dataset
+df_clean <- df %>%
+  mutate(
+    # Convert 'price' to numeric (this handles any remaining non-numeric values)
+    price = as.numeric(price),
+    # Convert 'quarter' (e.g., "2007-Q2") to a Date object
+    date = yq(quarter),
+    # Standardize town names to uppercase
+    town = toupper(town)
+  ) %>%
+  # Remove rows where price is missing
+  filter(!is.na(price))
+# 4. Preview Cleaned Data
+print(head(df_clean))
+```
+
+## Plotting Dataset 
+We will create some initial plots to visualize the data and identify trends or patterns.
+```{r}
+# Plot A: Trend of Average Median Resale Prices by Flat Type 
+# Compute average price per flat type over time
+avg_price_trend <- df_clean %>%
+  group_by(date, flat_type) %>%
+  summarise(avg_price = mean(price, na.rm = TRUE)) %>%
+  ungroup()
+# Plot the trend
+ggplot(avg_price_trend, aes(x = date, y = avg_price, color = flat_type)) +
+  geom_line() +
+  labs(title = "Trend of Median Resale Prices by Flat Type",
+       x = "Date",
+       y = "Average Price (SGD)",
+       color = "Flat Type") +
+  theme_minimal()
+```
+
+```{r}
+#| fig-width: 20
+#| fig-height: 15
+#| 
+# Plot B: Trend of 4-Room Resale Flat Prices in Selected Towns by Region
+# 1. Define Towns and Regions 
+north_towns <- c("WOODLANDS", "YISHUN", "SEMBAWANG")
+northeast_towns <- c("SENGKANG", "HOUGANG", "PUNGGOL")
+east_towns  <- c("TAMPINES", "BEDOK", "PASIR RIS")
+west_towns  <- c("JURONG WEST", "CHOA CHU KANG", "BUKIT BATOK")
+central_towns <- c("BISHAN", "TOA PAYOH", "GEYLANG")
+selected_towns <- c(north_towns, northeast_towns, east_towns, west_towns, central_towns)
+
+# Map towns to regions
+region_map <- data.frame(
+  town = selected_towns,
+  region = c(rep("North", 3), rep("North-East", 3), rep("East", 3), rep("West", 3), rep("Central", 3))
+)
+
+# 2. Filter Data
+df_4room_selected <- df_clean %>%
+  filter(flat_type == "4-room") %>%
+  filter(town %in% selected_towns) %>%
+  left_join(region_map, by = "town")
+
+# 3. Create Label Data (New Step)
+# We calculate the last data point for each town to know where to put the label
+town_labels <- df_4room_selected %>%
+  group_by(town) %>%
+  filter(date == max(date)) %>%
+  ungroup()
+
+# 4. Plotting
+ggplot(df_4room_selected, aes(x = date, y = price, color = town)) +
+  geom_line(size = 1) +
+  # Add labels directly to the end of the lines
+  geom_text(data = town_labels, aes(label = town), 
+            hjust = -0.1, size = 3, show.legend = FALSE) +
+  # Use facet_wrap without 'scales = "free_y"' to keep Y-axis common
+  facet_wrap(~region) + 
+  # Expand the x-axis slightly to the right to make room for the text labels
+  scale_x_date(expand = expansion(mult = c(0.05, 0.4))) +
+  labs(
+    title = "4-Room Resale Flat Prices by Region (15 Selected Towns)",
+    subtitle = "Quarterly Median Resale Prices (Common Y-Axis)",
+    x = "Year",
+    y = "Price (SGD)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none" # Remove the legend since lines are labeled directly
+  ) +
+  scale_y_continuous(labels = scales::comma)
+```
+
+```{r}
+# Plot C: Choropleth Map of Average 4-Room Resale Flat Prices by Planning Area for Target Years
+# Process & Filter Price Data
+# We need to map HDB town names to URA Planning Area names
+target_years <- c(2010, 2015, 2020, 2025)
+
+df_map_data <- df %>%
+  mutate(
+    price = as.numeric(price),
+    date = yq(quarter),
+    year = year(date),
+    town = toupper(town)
+  ) %>%
+  filter(flat_type == "4-room") %>%
+  filter(year %in% target_years) %>%
+  filter(!is.na(price)) %>%
+  # --- Crucial Step: Fix Name Mismatches ---
+  mutate(town = case_when(
+    town == "KALLANG/WHAMPOA" ~ "KALLANG",   # Map to closest major planning area
+    town == "CENTRAL AREA"    ~ "DOWNTOWN CORE",
+    TRUE ~ town
+  )) %>%
+  # Calculate average median price for the whole year
+  group_by(year, town) %>%
+  summarise(avg_price = mean(price, na.rm = TRUE)) %>%
+  ungroup()
+
+# 4. Prepare Geospatial Data for Faceting
+# To facet correctly (keeping empty regions grey), we create a grid of All Regions x All Years
+full_grid <- expand_grid(
+  name = unique(sg_map$name),
+  year = target_years
+)
+
+# Join the map shapes with the grid, then join the price data
+plot_data <- full_grid %>%
+  left_join(sg_map, by = "name") %>%
+  st_as_sf() %>% # Convert back to sf object after join
+  left_join(df_map_data, by = c("name" = "town", "year"))
+
+# 5. Plot the Faceted Choropleth Map
+ggplot(plot_data) +
+  geom_sf(aes(fill = avg_price), color = "white", size = 0.2) +
+  facet_wrap(~year, ncol = 2) +
+  # Use a consistent scale across all facets
+  scale_fill_viridis_c(
+    option = "magma", 
+    direction = -1,  # Darker colors = Higher prices
+    na.value = "grey90", 
+    labels = scales::comma,
+    name = "Avg Price (SGD)"
+  ) +
+  labs(
+    title = "Evolution of 4-Room Resale Flat Prices (2010 - 2025)",
+    subtitle = "Average Median Resale Price by Town",
+    caption = "Grey areas indicate no HDB resale data available for that year"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank(),
+    legend.position = "right",
+    strip.text = element_text(size = 12, face = "bold")
+  )
+```
+
