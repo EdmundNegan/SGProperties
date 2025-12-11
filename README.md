@@ -1,34 +1,40 @@
-### Edit `_quarto.yml` (RStudio)
+# Singapore HDB Resale Price Analysis 🇸🇬
 
-Tip: From the file pane in RStudio, open `README.md`, which contains these instructions. You can delete steps as you complete them.
+This project is an exploratory data analysis (EDA) website built with **R** and **Quarto**. [cite_start]It investigates the trends, drivers, and spatial patterns of public housing (HDB) resale prices in Singapore, contrasting its unique 99-year leasehold system with market-driven models like New York City[cite: 1, 6, 12].
 
-- [ ] 1. Change the all caps info in the `title:`, `author:` and `repo-url` fields in the YAML (top) section of `_quarto.yml` to your info. (Note: it's very important to maintain the indenting structure in this file precisely as is -- be careful!)
+## 📊 Project Overview
 
-### Render the book (RStudio)
+[cite_start]Approximately 80% of Singaporeans live in HDB flats[cite: 2, 8]. [cite_start]This project aims to demystify the factors influencing resale prices—specifically location, flat type, storey height, and lease duration[cite: 5, 14].
 
-- [ ] 1. If you haven't already, click "Help" "Check for Updates" to make sure you have the latest version of RStudio (and thus have Quarto installed.)
+**Key Analyses:**
+* [cite_start]**Macro Trends:** Evolution of median prices over the last 15 years, including the impact of COVID-19 and cooling measures[cite: 63, 64].
+* [cite_start]**Lease Decay:** Analysis of the non-linear relationship between remaining lease and price, highlighting the "U-shaped" resilience of large flats in mature estates[cite: 93].
+* [cite_start]**The "Million-Dollar" Phenomenon:** Spatial mapping of luxury HDB transactions to determine if high prices are driven by size or location[cite: 104, 111].
+* [cite_start]**Vertical Equity:** Quantifying the price premium commanded by higher floor levels[cite: 119].
 
-- [ ] 2. Render the web site locally by clicking the "Build" tap on the right and then "Render Book".
+## 📂 Data Sources
 
-- [ ] 3. Use `browseURL("docs/index.html")` to view your book locally (or just open `docs/index.html` in a browser).
+[cite_start]The analysis utilizes two official datasets from [Data.gov.sg](https://data.gov.sg/)[cite: 20]:
+1.  [cite_start]**Median Resale Prices:** Aggregated data by town and flat type to analyze broad market shifts[cite: 24].
+2.  [cite_start]**Transaction-Level Data (2017–Present):** Granular data including floor area, storey height, and remaining lease for micro-level analysis[cite: 25, 26].
 
-- [ ] 4. If it looks good, commit and push all changed files to GitHub.
-      
-- [ ] 5. Check that the rendered site looks correct on GitHub and that the links back to GitHub (icon on top left, edit this page / report an issue on right) work properly. Note that there is a delay between the time you push the files and when they show up on your sitel You can check the progress by clicking the Actions tab.
+## 🛠️ Tech Stack
 
-(You will need to repeat steps 2 and 4 every time you wish to update the book on GitHub Pages.)
+* **Framework:** [Quarto](https://quarto.org/) (Website generation)
+* **Language:** R
+* **Key Libraries:**
+    * [cite_start]`tidyverse` (Data manipulation & visualization) [cite: 33]
+    * [cite_start]`sf` (Geospatial mapping of planning areas) [cite: 33]
+    * [cite_start]`naniar` (Missing data analysis) [cite: 33]
+    * [cite_start]`mgcv` (Generalized Additive Models for lease curves) [cite: 82]
 
-### Update README (GitHub or RStudio)
+## 🚀 How to Run
 
-- [ ] 1. Delete the content of this **README** and add a short description of your project in its place. If you're working locally, be sure to commit and push the changes to GitHub.
-
-### Optional
-
-- [ ] 1. Choose a theme from [https://bootswatch.com/](https://bootswatch.com/) and replace "cosmo" in `_quarto.yml` with your prefered theme.
-
-### Additional features
-
-Please consult the official guide to **quarto** book websites: [https://quarto.org/docs/books/](https://quarto.org/docs/books/)
-
-
-
+1.  Clone this repository.
+2.  Open the project in RStudio.
+3.  Ensure the `datasets/` folder contains the required CSV files.
+4.  Render the website via the terminal:
+    ```bash
+    quarto render
+    ```
+5.  The generated site will be available in the `_site/` directory.

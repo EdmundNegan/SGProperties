@@ -34,8 +34,8 @@ Analysis: As expected, larger flat types (e.g., 5-room, executive) generally com
 ### Plot 1B: Trend of 4-Room Resale Flat Prices in Selected Towns by Region
 Next, we focus on 4-room flats and examine their price trends across selected towns, grouped by region. This allows us to see regional variations while maintaining a common Y-axis for better comparison.
 ```{r}
-#| fig-width: 24
-#| fig-height: 15
+#| fig-width: 15
+#| fig-height: 10
 #| 
 # Plot 1B: Trend of 4-Room Resale Flat Prices in Selected Towns by Region
 # 1. Define Towns and Regions 
