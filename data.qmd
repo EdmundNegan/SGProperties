@@ -1,40 +1,45 @@
 # Data
 
 ## Description
-The data sources we will be using for this project are: 
-1) Public housing: HDB Resale Flat Prices dataset (https://data.gov.sg/datasets?agencies=HDB&resultId=d_b51323a474ba789fb4cc3db58a3116d4)
-2) Private housing: Private Residential Property Transactions
-(https://www.ura.gov.sg/Corporate/Property/Property-Data/Private-Residential-Properties)
+Our project uses two complementary datasets from Singapore’s Housing & Development Board (HDB):
+Dataset 1 — Median Resale Prices by Town, Quarter, and Flat Type (https://data.gov.sg/datasets/d_b51323a474ba789fb4cc3db58a3116d4/view)
+Dataset 2 — Transaction-Level Resale Flat Prices (2017–Present)
+https://data.gov.sg/datasets/d_8b84c4ee58e3cfc0ece0d773c8ca6abc/view
 
-Both datasets are provided by official government ministries of Singapore, with the first being from the Housing and Development Board (HDB) and the second from the Urban Redevelopment Authority (URA). Both datasets are updated quarterly, and we will focus on data from the past 5 years to capture recent trends and the impact of government cooling measures.
+Both datasets are provided by the Housing and Development Board (HDB), an official government statutory board of Singapore. Whenever a flat is resold, an official resale application is filed with HDB and this data is then recorded and made publicly available online. Both datasets are updated quarterly, and we will focus on data from the past 5-10 years to capture recent trends and the impact of government cooling measures.
+
+Although both sources relate to resale flat prices, they serve different analytical purposes, and using them together enables a more complete understanding of price dynamics. The first dataset provides aggregated median resale prices by town, quarter, and flat type, allowing us to analyze broad trends and patterns over time. The second dataset contains transaction-level data, which includes detailed information on each individual transaction instead of an aggregated value for the town. Crucially, the second dataset includes additional variables such as block number, approximate level of flat, floor area and lease remaining (Singapore's public housing is typically sold on a 99-year leasehold). This granularity allows us to quantify micro-level factors influencing resale prices, such as the impact of lease duration or floor level on pricing.
 
 ## Missing value analysis
-At first glance, the dataset appears to have NA and “-” to indicate missing values. This likely represents represents "Not Applicable/Not Available" and "No Transactions" respectively. The NA value likely means that these type of flats are not available for purchase in those neighbourhoods (Bishan & 1-Room Flats) and the "-" could mean that there are flats available but no purchases were made. We will load the data and check for missing values across all columns.
+At first glance, the first dataset appears to have NA and “-” to indicate missing values. This likely represents represents "Not Applicable/Not Available" and "No Transactions" respectively. The NA value likely means that these type of flats are not available for purchase in those neighbourhoods (Bishan & 1-Room Flats) and the "-" could mean that there are flats available but no purchases were made.
+
+The second dataset appears to be cleaner with no obvious missing values. However, we will conduct a thorough missing value analysis and data cleaning process to ensure data integrity before proceeding with our analysis.
 
 ```{r}
 # Load necessary libraries
 library(tidyverse)
 library(sf)
 library(lubridate)
+library(naniar)
 
-# 1. Load the Data
-df <- read_csv("datasets/MedianResalePricesforRegisteredApplicationsbyTownandFlatType.csv", 
+# 1. Load the first Dataset: Median Resale Prices by Town, Quarter, and Flat Type
+df_median_resale <- read_csv("datasets/MedianResalePricesforRegisteredApplicationsbyTownandFlatType.csv", 
                na = c("na", "-", "NA"))
 
 # Load Singapore Geospatial Data (Planning Areas)
 # We use a public GeoJSON link for Singapore Planning Areas
 # If this link fails, you can download "Master Plan 2019 Planning Area Boundary" from data.gov.sg
 geojson_url <- "https://raw.githubusercontent.com/yinshanyang/singapore/master/maps/2-planning-area.geojson"
-sg_map <- st_read(geojson_url, quiet = TRUE) %>%
+sg_map <- st_read(geojson_url, quiet = TRUE) |>
   mutate(name = toupper(name)) # Standardize map names to Uppercase
 
 # 2. Check for Missing Values
-missing_summary <- df %>%
+missing_summary_median <- df_median_resale |>
   summarise(across(everything(), ~ sum(is.na(.)), .names = "missing_{col}"))
-print(missing_summary)
+print(missing_summary_median)
 
 # 3. Clean Dataset
-df_clean <- df %>%
+df_median_clean <- df_median_resale |>
   mutate(
     # Convert 'price' to numeric (this handles any remaining non-numeric values)
     price = as.numeric(price),
@@ -42,520 +47,137 @@ df_clean <- df %>%
     date = yq(quarter),
     # Standardize town names to uppercase
     town = toupper(town)
-  ) %>%
-  # Remove rows where price is missing
-  filter(!is.na(price))
+  )
 # 4. Preview Cleaned Data
-print(head(df_clean))
-```
+print(head(df_median_clean))
 
-## Plotting Dataset 
-We will create some initial plots to visualize the data and identify trends or patterns.
-```{r}
-# Plot A: Trend of Average Median Resale Prices by Flat Type 
-# Compute average price per flat type over time
-avg_price_trend <- df_clean %>%
-  group_by(date, flat_type) %>%
-  summarise(avg_price = mean(price, na.rm = TRUE)) %>%
-  ungroup()
-# Plot the trend
-ggplot(avg_price_trend, aes(x = date, y = avg_price, color = flat_type)) +
-  geom_line() +
-  labs(title = "Trend of Median Resale Prices by Flat Type",
-       x = "Date",
-       y = "Average Price (SGD)",
-       color = "Flat Type") +
-  theme_minimal()
+# Remove missing values
+df_median_final <- df_median_clean |>
+  filter(!is.na(price))
 ```
 
 ```{r}
-#| fig-width: 20
-#| fig-height: 15
-#| 
-# Plot B: Trend of 4-Room Resale Flat Prices in Selected Towns by Region
-# 1. Define Towns and Regions 
-north_towns <- c("WOODLANDS", "YISHUN", "SEMBAWANG")
-northeast_towns <- c("SENGKANG", "HOUGANG", "PUNGGOL")
-east_towns  <- c("TAMPINES", "BEDOK", "PASIR RIS")
-west_towns  <- c("JURONG WEST", "CHOA CHU KANG", "BUKIT BATOK")
-central_towns <- c("BISHAN", "TOA PAYOH", "GEYLANG")
-selected_towns <- c(north_towns, northeast_towns, east_towns, west_towns, central_towns)
-
-# Map towns to regions
-region_map <- data.frame(
-  town = selected_towns,
-  region = c(rep("North", 3), rep("North-East", 3), rep("East", 3), rep("West", 3), rep("Central", 3))
-)
-
-# 2. Filter Data
-df_4room_selected <- df_clean %>%
-  filter(flat_type == "4-room") %>%
-  filter(town %in% selected_towns) %>%
-  left_join(region_map, by = "town")
-
-# 3. Create Label Data (New Step)
-# We calculate the last data point for each town to know where to put the label
-town_labels <- df_4room_selected %>%
-  group_by(town) %>%
-  filter(date == max(date)) %>%
-  ungroup()
-
-# 4. Plotting
-ggplot(df_4room_selected, aes(x = date, y = price, color = town)) +
-  geom_line(size = 1) +
-  # Add labels directly to the end of the lines
-  geom_text(data = town_labels, aes(label = town), 
-            hjust = -0.1, size = 3, show.legend = FALSE) +
-  # Use facet_wrap without 'scales = "free_y"' to keep Y-axis common
-  facet_wrap(~region) + 
-  # Expand the x-axis slightly to the right to make room for the text labels
-  scale_x_date(expand = expansion(mult = c(0.05, 0.4))) +
-  labs(
-    title = "4-Room Resale Flat Prices by Region (15 Selected Towns)",
-    subtitle = "Quarterly Median Resale Prices (Common Y-Axis)",
-    x = "Year",
-    y = "Price (SGD)"
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    legend.position = "none" # Remove the legend since lines are labeled directly
-  ) +
-  scale_y_continuous(labels = scales::comma)
-```
-
-```{r}
-# Plot C: Choropleth Map of Average 4-Room Resale Flat Prices by Planning Area for Target Years
-# Process & Filter Price Data
-# We need to map HDB town names to URA Planning Area names
-target_years <- c(2010, 2015, 2020, 2025)
-
-df_map_data <- df %>%
-  mutate(
-    price = as.numeric(price),
-    date = yq(quarter),
-    year = year(date),
-    town = toupper(town)
-  ) %>%
-  filter(flat_type == "4-room") %>%
-  filter(year %in% target_years) %>%
-  filter(!is.na(price)) %>%
-  # --- Crucial Step: Fix Name Mismatches ---
-  mutate(town = case_when(
-    town == "KALLANG/WHAMPOA" ~ "KALLANG",   # Map to closest major planning area
-    town == "CENTRAL AREA"    ~ "DOWNTOWN CORE",
-    TRUE ~ town
-  )) %>%
-  # Calculate average median price for the whole year
-  group_by(year, town) %>%
-  summarise(avg_price = mean(price, na.rm = TRUE)) %>%
-  ungroup()
-
-# 4. Prepare Geospatial Data for Faceting
-# To facet correctly (keeping empty regions grey), we create a grid of All Regions x All Years
-full_grid <- expand_grid(
-  name = unique(sg_map$name),
-  year = target_years
-)
-
-# Join the map shapes with the grid, then join the price data
-plot_data <- full_grid %>%
-  left_join(sg_map, by = "name") %>%
-  st_as_sf() %>% # Convert back to sf object after join
-  left_join(df_map_data, by = c("name" = "town", "year"))
-
-# 5. Plot the Faceted Choropleth Map
-ggplot(plot_data) +
-  geom_sf(aes(fill = avg_price), color = "white", size = 0.2) +
-  facet_wrap(~year, ncol = 2) +
-  # Use a consistent scale across all facets
-  scale_fill_viridis_c(
-    option = "magma", 
-    direction = -1,  # Darker colors = Higher prices
-    na.value = "grey90", 
-    labels = scales::comma,
-    name = "Avg Price (SGD)"
-  ) +
-  labs(
-    title = "Evolution of 4-Room Resale Flat Prices (2010 - 2025)",
-    subtitle = "Average Median Resale Price by Town",
-    caption = "Grey areas indicate no HDB resale data available for that year"
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text = element_blank(),
-    axis.ticks = element_blank(),
-    panel.grid = element_blank(),
-    legend.position = "right",
-    strip.text = element_text(size = 12, face = "bold")
-  )
-```
-```{r}
-# Lease Decay: Panel Plot + GAM + Heatmap --------------------------
+#| fig-width: 15
+#| fig-height: 10
 
 library(tidyverse)
-library(lubridate)
-library(stringr)
-library(mgcv)
+library(naniar)
 
-# 1. Load transaction-level HDB resale data (2017 onwards)
-hdb_resale <- read_csv(
-  "datasets/ResaleflatpricesbasedonregistrationdatefromJan2017onwards.csv",
-  show_col_types = FALSE
-)
+# ---------------------------------------------------------
+# 1. Refined Plot: Missingness by Town
+# ---------------------------------------------------------
+# Since only 'price' is missing, we select only town and price.
+# This makes the plot cleaner (removes 0% bars for quarter/flat_type).
+df_median_clean |>
+  select(town, price) |>
+  gg_miss_fct(fct = town) +
+  labs(title = "Percentage of Missing Prices by Town (Market Gaps)")
 
-# 2. Clean remaining lease + compute price per sqm -----------------
-
-hdb_resale_clean <- hdb_resale %>%
-  mutate(
-    years  = str_extract(remaining_lease, "\\d+(?= year)")  %>% as.numeric(),
-    months = str_extract(remaining_lease, "\\d+(?= month)") %>% as.numeric(),
-    months = replace_na(months, 0),
-    remaining_lease_years = years + months / 12,
-    price_psm = resale_price / floor_area_sqm
-  ) %>%
-  filter(
-    remaining_lease_years >= 0,
-    remaining_lease_years <= 99,
-    price_psm > 0
-  )
-
-main_flats <- c("3 ROOM", "4 ROOM", "5 ROOM")
-
-panel_data <- hdb_resale_clean %>%
-  filter(flat_type %in% main_flats)
-
-# 3. Panel plot: price per sqm vs remaining lease, by flat type ----
-
-ggplot(panel_data, aes(x = remaining_lease_years, y = price_psm)) +
-  geom_point(alpha = 0.05, size = 0.6) +
-  geom_smooth(method = "loess", se = FALSE, linewidth = 1, color = "darkred") +
-  facet_wrap(~ flat_type, scales = "free_y") +
-  labs(
-    title = "Lease Decay in HDB Resale Prices (2017–Present)",
-    subtitle = "Price per sqm vs remaining lease, by flat type",
-    x = "Remaining Lease (years)",
-    y = "Resale Price per sqm (SGD)"
-  ) +
-  theme_minimal()
-
-# 4. GAM curve: smooth lease-decay shape ---------------------------
-
-gam_data <- panel_data   # reuse
-
-gam_model <- gam(
-  price_psm ~ s(remaining_lease_years) + flat_type,
-  data = gam_data
-)
-
-pred_grid <- expand_grid(
-  remaining_lease_years = seq(0, 99, by = 0.5),
-  flat_type = main_flats
-) %>%
-  mutate(pred = predict(gam_model, newdata = cur_data_all()))
-
-ggplot(pred_grid, aes(x = remaining_lease_years, y = pred, color = flat_type)) +
-  geom_line(linewidth = 1.1) +
-  labs(
-    title = "Smooth GAM Curve of Lease Decay (HDB Resale Market)",
-    subtitle = "Predicted price per sqm by remaining lease and flat type",
-    x = "Remaining Lease (years)",
-    y = "Predicted Price per sqm (SGD)",
-    color = "Flat Type"
-  ) +
-  theme_minimal()
-
-# 5. Heatmap: lease bins × flat type -------------------------------
-
-hdb_lease_decay <- panel_data %>%
-  mutate(
-    lease_bin = cut(
-      remaining_lease_years,
-      breaks = seq(0, 100, by = 10),               # 10-year bins
-      include.lowest = TRUE,
-      right = FALSE,
-      labels = paste0(seq(0, 90, 10), "-", seq(10, 100, 10), "y")
-    )
-  ) %>%
-  group_by(flat_type, lease_bin) %>%
-  summarise(
-    median_psm = median(price_psm, na.rm = TRUE),
-    n = n(),
-    .groups = "drop"
-  ) %>%
-  filter(n >= 30)   # drop sparse tiles
-
-ggplot(hdb_lease_decay, aes(x = lease_bin, y = flat_type, fill = median_psm)) +
-  geom_tile(color = "white") +
-  scale_fill_viridis_c(
-    option = "magma",
-    direction = -1,
-    labels = scales::comma,
-    name = "Median Price\n(SGD per sqm)"
-  ) +
-  labs(
-    title = "Lease Decay Heatmap (HDB Resale Prices, 2017–Present)",
-    subtitle = "Median price per sqm by flat type and 10-year remaining lease bands",
-    x = "Remaining Lease (years, binned)",
-    y = "Flat Type"
-  ) +
+# ---------------------------------------------------------
+# 2. Refined Plot: Missing Prices Over Time
+# ---------------------------------------------------------
+df_median_clean |>
+  filter(is.na(price)) |> # Filter for missing rows first
+  group_by(quarter, flat_type) |>
+  summarise(missing_count = n(), .groups = 'drop') |>
+  ggplot(aes(x = quarter, y = missing_count, fill = flat_type)) +
+  geom_col() + 
   theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    panel.grid = element_blank()
-  )
+  labs(title = "Count of Missing Prices per Quarter by Flat Type",
+       y = "Number of Missing Records",
+       subtitle = "High bars indicate quarters with few transactions") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
-
+# ---------------------------------------------------------
+# 3. Heatmap: Town vs Flat Type
+# ---------------------------------------------------------
+# This visualizes your "Top 10" list in a single grid.
+# Darker squares = More missing prices (More gaps in data)
+df_median_clean |>
+  filter(is.na(price)) |>
+  count(town, flat_type) |>
+  ggplot(aes(x = flat_type, y = reorder(town, n), fill = n)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "magma", direction = -1) +
+  theme_minimal() +
+  labs(title = "Heatmap of Missing Prices: Town vs. Flat Type",
+       x = "Flat Type", 
+       y = "Town", 
+       fill = "Missing Count")
 ```
-The lease-decay analysis uses the transaction-level HDB resale dataset (2017–2025), as it is the only public dataset containing remaining_lease. Lease decay is a structural relationship and does not require exact alignment with the time ranges of the median-price dataset.
+### Missing Data from first dataset
+The missing data in the first dataset primarily arises from two scenarios: 
+1. **Non-Availability of Flat Types in Certain Towns**: Some towns do not have certain flat types available for purchase. For example, Bishan does not have 1-Room flats, leading to NA values in the dataset for that combination.
+2. **Lack of Transactions in Specific Quarters**: In some quarters, there were no resale transactions for certain flat types in specific towns. This results in "-" entries in the dataset, indicating that while the flat type exists in that town, no sales occurred during that period.
 
+Plotting the graphs above helps visualize these gaps, showing which towns and flat types are most affected by missing data. Combining this with contextual knowledge of Singapore, the towns with the most missing data is Bukit Timah, Marine Parade and Central. Bukit Timah and Marine Parade are known to be more affluent areas with a higher concentration of private housing, which may explain the lack of HDB resale transactions. The Central area is also a prime location with a significant presence of private condominiums, leading to fewer HDB resale activities.
+
+We can also begin to analyse the effects of government cooling measures on the HDB resale market through the missing data graph. This is likely an approximate inverse representation of the housing market, with peaks in missing data indicating quarters with low transaction volumes. There is noticeable increase in the 2013-2015 period, which coincides with the government's first round of cooling measures in December 2013. A sharp spike is also observed in 2020 Q2, which aligns with the onset of the COVID-19 pandemic and the associated economic uncertainties that likely led to a temporary halt in property transactions. We will see a more detailed analysis of these events on the other aspects of the housing market later in the project.
 
 ```{r}
-# Animated GIF: Evolution of HDB Prices by Town -------------------
+# Load second Dataset: Transaction-Level Resale Flat Prices (2017–Present)
+df_transactions <- read_csv("datasets/ResaleflatpricesbasedonregistrationdatefromJan2017onwards.csv",
+                            na = c("na", "-", "NA"))
 
-library(tidyverse)
-library(sf)
-library(lubridate)
-library(gganimate)
-library(gifski)
+# Check for Missing Values
+missing_summary_transactions <- df_transactions |>
+  summarise(across(everything(), ~ sum(is.na(.)), .names = "missing_{col}"))
+print(missing_summary_transactions)
 
-# Assume you already have:
-# df_clean: from your earlier code (MedianResalePricesforRegisteredApplicationsbyTownandFlatType)
-# sg_map: planning area shapefile with column `name` in UPPERCASE
-
-# Example (if needed):
-# df <- read_csv("datasets/MedianResalePricesforRegisteredApplicationsbyTownandFlatType.csv",
-#                na = c("na", "-", "NA"))
-# df_clean <- df %>%
-#   mutate(
-#     price = as.numeric(price),
-#     date  = yq(quarter),
-#     town  = toupper(town)
-#   ) %>%
-#   filter(!is.na(price))
-
-# ---- 1. Prepare HDB price data for animation ----
-
-hdb_anim_data <- df_clean %>%
-  filter(flat_type == "4-room") %>%       # focus on 4-room; change if needed
+# Clean Dataset
+df_clean_transactions <- df_transactions |>
   mutate(
+    # Ensure your column is actually named "month" (case-sensitive)
+    date = ym(month),
+    
+    # Ensure 'resale_price' and 'floor_area_sqm' are numeric
+    resale_price = as.numeric(resale_price),
+    floor_area_sqm = as.numeric(floor_area_sqm),
+    
+    # Standardize character columns to uppercase
     town = toupper(town),
-    # optional: restrict to recent years, e.g. last 10–15 years
-    year = year(date)
-  ) %>%
-  # Fix known mismatches between HDB "town" and URA planning areas (sg_map$name)
-  mutate(
-    town = case_when(
-      town == "KALLANG/WHAMPOA" ~ "KALLANG",
-      town == "CENTRAL AREA"    ~ "DOWNTOWN CORE",
-      TRUE ~ town
-    )
-  ) %>%
-  group_by(date, town) %>%
-  summarise(
-    median_price = mean(price, na.rm = TRUE),
-    .groups = "drop"
-  )
+    flat_type = toupper(flat_type),
+    
+    # --- PARSE 'remaining_lease' ---
+    lease_years = as.numeric(str_extract(remaining_lease, "\\d+(?= years)")),
+    lease_months = as.numeric(str_extract(remaining_lease, "\\d+(?= months)")),
+    lease_months = replace_na(lease_months, 0),
+    remaining_lease_years = lease_years + (lease_months / 12),
+    
+    # Extract the first number (start of range)
+    storey_lower = as.numeric(str_extract(storey_range, "^\\d+")),
+    # Extract the last number (end of range)
+    storey_upper = as.numeric(str_extract(storey_range, "\\d+$")),
+    # Calculate the average
+    storey_avg = (storey_lower + storey_upper) / 2,
+    
+    # --- NEW: Calculate Price Per Sqm ---
+    price_per_sqm = resale_price / floor_area_sqm
+  ) |>
+  # Remove intermediate columns
+  select(-lease_years, -lease_months, -storey_lower, -storey_upper)
 
-# ---- 2. Build full grid of (planning area × date) so "no data" shows as grey ----
-
-all_dates <- sort(unique(hdb_anim_data$date))
-
-full_grid_anim <- expand_grid(
-  name = unique(sg_map$name),
-  date = all_dates
-)
-
-# Join shapes + price data
-anim_plot_data <- full_grid_anim %>%
-  left_join(sg_map, by = c("name")) %>%
-  st_as_sf() %>%
-  left_join(hdb_anim_data, by = c("name" = "town", "date"))
-
-# ---- 3. Animated choropleth ----
-
-p_anim <- ggplot(anim_plot_data) +
-  geom_sf(aes(fill = median_price), color = "white", size = 0.2) +
-  scale_fill_viridis_c(
-    option = "magma",
-    direction = -1,
-    na.value = "grey90",
-    labels = scales::comma,
-    name = "Median Price (SGD)"
-  ) +
-  labs(
-    title = "Evolution of 4-Room HDB Resale Prices by Town",
-    subtitle = "Quarter: {format(frame_time, '%Y-Q%q')}",
-    caption = "Grey areas indicate no HDB resale data for that town/quarter"
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text = element_blank(),
-    axis.ticks = element_blank(),
-    panel.grid = element_blank(),
-    legend.position = "right"
-  ) +
-  # animate over time using the 'date' variable
-  transition_time(date) +
-  ease_aes("linear")
-
-# ---- 4. Render animation (shows in RStudio Viewer) ---- 🔹
-
-anim <- animate(
-  p_anim,
-  renderer = gifski_renderer(),
-  width = 800,
-  height = 600,
-  fps = 6,
-  duration = 12,
-  rewind = FALSE
-)
-
-anim  # 🔹 printing this makes RStudio display the animation
-
-# ---- 5. Save GIF for use in HTML output ---- 🔹
-
-if (!dir.exists("figures")) dir.create("figures", recursive = TRUE)
-
-anim_save("figures/hdb_4room_prices_by_town.gif", animation = anim)
-
+# Preview Cleaned Data
+print(head(df_clean_transactions))
 ```
-Setup:
-```{r}
-library(tidyverse)
-library(lubridate)
-library(stringr)
-library(sf)
 
-# 1. Load transaction-level HDB resale data (2017 onwards)
-hdb_resale <- read_csv(
-  "datasets/ResaleflatpricesbasedonregistrationdatefromJan2017onwards.csv",
-  show_col_types = FALSE
-)
-
-# 2. Basic cleaning + year, uppercase town
-hdb_resale_clean <- hdb_resale %>%
-  mutate(
-    year = year(ym(month)),
-    town = toupper(town)
-  )
-
-# 3. Define million-dollar flats
-million_flats <- hdb_resale_clean %>%
-  filter(resale_price >= 1000000)
-
-```
+Now that we have cleaned the second dataset, we can see that there are no missing values in any of the columns. This indicates that the dataset is relatively complete and does not require further imputation or handling of missing data. We can proceed with our analysis using the two cleaned datasets above.
 
 ```{r}
-# Aggregate counts of million-dollar flats by town and year
-million_by_town_year <- million_flats %>%
-  group_by(year, town) %>%
-  summarise(n = n(), .groups = "drop") %>%
-  # keep towns that have at least 5 million-dollar transactions total (for readability)
-  group_by(town) %>%
-  mutate(total_n = sum(n)) %>%
-  ungroup() %>%
-  filter(total_n >= 5)
+# ---------------------------------------------------------
+# Save Objects for the Next QMD File
+# ---------------------------------------------------------
 
-ggplot(million_by_town_year, aes(x = reorder(town, n), y = n, fill = factor(year))) +
-  geom_col(position = "dodge") +
-  coord_flip() +
-  labs(
-    title = "Million-Dollar HDB Resale Flats by Town and Year",
-    subtitle = "Towns with at least 5 million-dollar transactions (2017–Present)",
-    x = "Town",
-    y = "Number of Million-Dollar Transactions",
-    fill = "Year"
-  ) +
-  theme_minimal()
+# 1. Create a "processed_data" folder if it doesn't exist
+if(!dir.exists("processed_data")) {
+  dir.create("processed_data")
+}
 
+# 2. Save the cleaned dataframes as .rds files
+# using write_rds() preserves column types (dates, factors) and geometry (sf)
+write_rds(df_median_final, "processed_data/df_median_final.rds")
+write_rds(sg_map, "processed_data/sg_map.rds")
+write_rds(df_clean_transactions, "processed_data/df_clean_transactions.rds")
+
+print("Data saved successfully to 'processed_data/' folder.")
 ```
-
-Figure X shows that million-dollar HDB resale flats are highly concentrated in a small number of towns. Mature, centrally located estates such as [BISHAN / TOA PAYOH / QUEENSTOWN / KALLANG/WHAMPOA — whatever appears in your plot] dominate the count each year, while most towns rarely register any million-dollar transactions. Over time, the number of such transactions generally increases, suggesting that “luxury HDB” units are becoming more common despite repeated cooling measures.
-
-
-```{r}
-# 1. Count million-dollar flats per town (all years combined)
-million_by_town <- million_flats %>%
-  group_by(town) %>%
-  summarise(n = n(), .groups = "drop")
-
-# 2. Fix mismatched names to align with sg_map
-million_by_town <- million_by_town %>%
-  mutate(
-    town_for_map = case_when(
-      town == "KALLANG/WHAMPOA" ~ "KALLANG",
-      town == "CENTRAL AREA"    ~ "DOWNTOWN CORE",
-      TRUE ~ town
-    )
-  )
-
-# 3. Join with spatial data
-sg_map_join <- sg_map %>%
-  left_join(million_by_town, by = c("name" = "town_for_map"))
-
-# 4. Compute centroids for point plotting
-centroids <- sg_map_join %>%
-  st_centroid() %>%
-  filter(!is.na(n))   # keep only towns with at least 1 million-dollar flat
-
-# 5. Plot: base map + points sized by count
-ggplot() +
-  geom_sf(data = sg_map, fill = "grey95", color = "white", linewidth = 0.2) +
-  geom_sf(data = sg_map_join, aes(fill = n), color = "white", linewidth = 0.2) +
-  scale_fill_viridis_c(
-    option = "magma",
-    direction = -1,
-    na.value = "grey90",
-    name = "Million-Dollar\nHDB Resales"
-  ) +
-  geom_sf(data = centroids, aes(size = n), color = "cyan", alpha = 0.8) +
-  scale_size_continuous(name = "Number of\nMillion-Dollar Flats") +
-  labs(
-    title = "Spatial Concentration of Million-Dollar HDB Flats",
-    subtitle = "Counts aggregated over 2017–Present",
-    caption = "Circles sized by number of million-dollar transactions; grey areas indicate no such transactions"
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text = element_blank(),
-    axis.ticks = element_blank(),
-    panel.grid = element_blank(),
-    legend.position = "right"
-  )
-
-```
-Figure Y highlights the spatial clustering of million-dollar HDB flats. Only a handful of towns register a substantial number of million-dollar transactions, and these are predominantly in central or city-fringe regions. Peripheral towns in the North, West, and far East see few or no such sales, reinforcing the idea that location — rather than flat size alone — is a key driver of “luxury” HDB pricing.
-
-```{r}
-# For performance, you can optionally downsample non-million points
-set.seed(123)
-non_million_sample <- hdb_resale_clean %>%
-  filter(resale_price < 1000000) %>%
-  sample_frac(0.15)   # 15% sample to keep the plot light; adjust as needed
-
-ggplot() +
-  geom_point(
-    data = non_million_sample,
-    aes(x = floor_area_sqm, y = resale_price),
-    alpha = 0.15,
-    size = 0.6
-  ) +
-  geom_point(
-    data = million_flats,
-    aes(x = floor_area_sqm, y = resale_price),
-    color = "red",
-    alpha = 0.8,
-    size = 1.6
-  ) +
-  scale_y_continuous(labels = scales::comma) +
-  labs(
-    title = "Are Million-Dollar HDB Flats Just Bigger?",
-    subtitle = "Floor area vs resale price, highlighting million-dollar transactions",
-    x = "Floor Area (sqm)",
-    y = "Resale Price (SGD)"
-  ) +
-  theme_minimal()
-
-```
-Figure Z shows the relationship between floor area and resale price. Million-dollar flats (in red) tend to cluster in the upper-right region of the scatterplot, indicating that they are generally larger and more expensive than typical units. However, there is also overlap with non-million-dollar flats of similar size, suggesting that location and flat attributes (storey, orientation, proximity to MRT/amenities) likely push certain units over the million-dollar threshold, rather than size alone.
