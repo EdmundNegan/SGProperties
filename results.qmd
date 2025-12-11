@@ -319,14 +319,14 @@ centroids <- sg_map_join |>
 # 5. Plot: base map + points sized by count
 ggplot() +
   geom_sf(data = sg_map, fill = "grey95", color = "white", linewidth = 0.2) +
-  geom_sf(data = sg_map_join, aes(fill = n), color = "white", linewidth = 0.2) +
+  geom_sf(data = sg_map_join, color = "white", linewidth = 0.2) +
   scale_fill_viridis_c(
     option = "magma",
     direction = -1,
     na.value = "grey90",
     name = "Million-Dollar\nHDB Resales"
   ) +
-  geom_sf(data = centroids, aes(size = n), color = "cyan", alpha = 0.8) +
+  geom_sf(data = centroids, aes(size = n), color = "red", alpha = 0.8) +
   scale_size_continuous(name = "Number of\nMillion-Dollar Flats") +
   labs(
     title = "Spatial Concentration of Million-Dollar HDB Flats",
